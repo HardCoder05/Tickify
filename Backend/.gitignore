@@ -1,0 +1,74 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.local
+.env.production
+.env.secrets
+*.env.secrets
+
+# Credenciales y archivos sensibles
+credenciales_bd.txt
+*.pem
+*.key
+*.crt
+*.p12
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+pytest_cache/
+.pytest_cache/
+.coverage.*
+
+# Logs
+*.log
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# FastAPI / Uvicorn
+# (por si guardas sockets o reloads en dev)
+*.pid
+app.pid
+
+# Deployment artifacts
+*.tar.gz
+*.zip
+deployment-package/
+
+# Others
+.DS_Store
+Thumbs.db
+
+!Backend/logs/app.log

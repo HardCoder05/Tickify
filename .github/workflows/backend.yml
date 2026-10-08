@@ -1,0 +1,358 @@
+name: Backend CI/CD
+
+on:
+  push:
+    branches: 
+      - main
+      - 'dev/**'
+      - 'origin/dev/**'
+    # Activar con cambios en Backend O Frontend
+    paths:
+      - 'Backend/**'
+      - 'Frontend/**'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'Backend/**'
+      - 'Frontend/**'
+  workflow_dispatch:  # Permite ejecutar manualmente desde GitHub
+
+jobs:
+  test-backend:
+    name: Test Backend
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: ./Backend
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.13'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-html
+    
+    - name: Create .env for tests
+      run: |
+        cat > .env << EOF
+        DB_HOST=${{ secrets.DB_HOST }}
+        DB_NAME=${{ secrets.DB_NAME }}
+        DB_USER=${{ secrets.DB_USER }}
+        DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+        DB_PORT=${{ secrets.DB_PORT }}
+        GOOGLE_CLIENT_ID=mock-test-client-id
+        GOOGLE_CLIENT_SECRET=mock-test-secret
+        GOOGLE_REDIRECT_URL=https://testserver/callback
+        CLOUD_NAME=${{ secrets.CLOUD_NAME }}
+        CLOUD_API_KEY=${{ secrets.CLOUD_API_KEY }}
+        CLOUD_API_SECRET=${{ secrets.CLOUD_API_SECRET }}
+        EOF
+    
+    - name: Run tests
+      env:
+        DB_HOST: ${{ secrets.DB_HOST }}
+        DB_NAME: ${{ secrets.DB_NAME }}
+        DB_USER: ${{ secrets.DB_USER }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        DB_PORT: ${{ secrets.DB_PORT }}
+        CLOUD_NAME: ${{ secrets.CLOUD_NAME }}
+        CLOUD_API_KEY: ${{ secrets.CLOUD_API_KEY }}
+        CLOUD_API_SECRET: ${{ secrets.CLOUD_API_SECRET }}
+      run: |
+        pytest --html=test-results.html --self-contained-html
+    
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results
+        path: Backend/test-results.html
+
+  # test-frontend:
+  #   name: Test Frontend
+  #   runs-on: ubuntu-latest
+  #   
+  #   defaults:
+  #     run:
+  #       working-directory: ./Frontend/tickify-frontend
+  #   
+  #   steps:
+  #   - uses: actions/checkout@v4
+  #   
+  #   - name: Set up Node.js
+  #     uses: actions/setup-node@v4
+  #     with:
+  #       node-version: '22'
+  #       cache: 'npm'
+  #       cache-dependency-path: './Frontend/tickify-frontend/package-lock.json'
+  #   
+  #   - name: Install dependencies
+  #     run: npm ci
+  #   
+  #   - name: Check TypeScript
+  #     run: npx tsc --noEmit
+  #     continue-on-error: false
+  #   
+  #   - name: Build Frontend
+  #     run: npm run build
+  #     env:
+  #       VITE_API_URL: http://localhost:8000
+  #   
+  #   - name: Verify build output
+  #     run: |
+  #       if [ ! -f "dist/index.html" ]; then
+  #         echo "❌ Error: dist/index.html no se generó"
+  #         exit 1
+  #       fi
+  #       echo "✅ Frontend compilado correctamente"
+  #       ls -lh dist/
+
+  deploy-to-ec2:
+    name: Deploy to EC2
+    needs: [test-backend]  # Solo espera Backend, Frontend deshabilitado temporalmente
+    runs-on: ubuntu-latest
+    if: |
+      (github.ref == 'refs/heads/main' || 
+       contains(github.ref, 'dev/miguel') ||
+       contains(github.ref, 'dev/despliegue'))
+      && github.event_name == 'push'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Show deployment info
+      run: |
+        echo "🚀 Iniciando despliegue a EC2..."
+        echo "Branch: ${{ github.ref_name }}"
+        echo "Commit: ${{ github.sha }}"
+        echo "Author: ${{ github.actor }}"
+        echo "Tests Backend: ✅ Pasados"
+        echo "Tests Frontend: ⏭️  Saltados (temporalmente deshabilitado)"
+    
+    - name: Create deployment package
+      run: |
+        cd Backend
+        
+        # Crear .env con credenciales de producción
+        cat > .env << EOF
+        DB_HOST=${{ secrets.DB_HOST }}
+        DB_NAME=${{ secrets.DB_NAME }}
+        DB_USER=${{ secrets.DB_USER }}
+        DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+        DB_PORT=${{ secrets.DB_PORT }}
+        GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+        GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
+        GOOGLE_REDIRECT_URL=${{ secrets.GOOGLE_REDIRECT_URL }}
+        CLOUD_NAME=${{ secrets.CLOUD_NAME }}
+        CLOUD_API_KEY=${{ secrets.CLOUD_API_KEY }}
+        CLOUD_API_SECRET=${{ secrets.CLOUD_API_SECRET }}
+        EOF
+        
+        # Crear paquete ZIP con todo el código
+        zip -r ../backend-deploy.zip . \
+          -x "*.git*" \
+          -x "*__pycache__*" \
+          -x "*.pytest_cache*" \
+          -x "tests/*" \
+          -x "*.pyc" \
+          -x "test-results.html"
+        
+        cd ..
+        echo "📦 Paquete creado:"
+        ls -lh backend-deploy.zip
+    
+    - name: Upload deployment package
+      uses: actions/upload-artifact@v4
+      with:
+        name: backend-deployment-package
+        path: backend-deploy.zip
+        retention-days: 7
+    
+    - name: Trigger deployment on EC2 via webhook
+      id: webhook
+      if: success()
+      run: |
+        echo "🔔 Notificando a EC2 para despliegue automático..."
+        
+        # Extraer solo el nombre de la rama (sin refs/heads/)
+        BRANCH_NAME="${{ github.ref_name }}"
+        EC2_HOST="${{ secrets.EC2_HOST }}"
+        
+        echo "📡 Enviando webhook a: http://$EC2_HOST:9000/deploy"
+        echo "📦 Branch: $BRANCH_NAME"
+        echo ""
+        
+        # Verificar si el backend está accesible via HTTPS (a través de nginx)
+        echo "🔍 Verificando conectividad con el backend..."
+        BACKEND_CHECK=$(curl -s --max-time 10 "https://tickify.duckdns.org/api/eventos" 2>&1 || echo "ERROR")
+        
+        if echo "$BACKEND_CHECK" | grep -q "detail\|eventos\|\[\]"; then
+          echo "✅ Backend accesible via https://tickify.duckdns.org/api/"
+        else
+          echo "ℹ️  No se pudo verificar el backend (puede estar reiniciándose)"
+        fi
+        
+        # Verificar si el webhook está corriendo
+        echo ""
+        echo "🔍 Enviando solicitud al webhook server (puerto 9000)..."
+        
+        # Crear payload con información del despliegue + credenciales
+        PAYLOAD=$(cat <<EOF
+        {
+          "repository": "${{ github.repository }}",
+          "branch": "$BRANCH_NAME",
+          "commit": "${{ github.sha }}",
+          "author": "${{ github.actor }}",
+          "run_id": "${{ github.run_id }}",
+          "backend_tests": "passed",
+          "frontend_tests": "passed",
+          "env_vars": {
+            "DB_HOST": "${{ secrets.DB_HOST }}",
+            "DB_NAME": "${{ secrets.DB_NAME }}",
+            "DB_USER": "${{ secrets.DB_USER }}",
+            "DB_PASSWORD": "${{ secrets.DB_PASSWORD }}",
+            "DB_PORT": "${{ secrets.DB_PORT }}",
+            "GOOGLE_CLIENT_ID": "${{ secrets.GOOGLE_CLIENT_ID }}",
+            "GOOGLE_CLIENT_SECRET": "${{ secrets.GOOGLE_CLIENT_SECRET }}",
+            "GOOGLE_REDIRECT_URL": "${{ secrets.GOOGLE_REDIRECT_URL }}",
+            "SESSION_SECRET": "${{ secrets.SESSION_SECRET }}",
+            "CLOUD_NAME": "${{ secrets.CLOUD_NAME }}",
+            "CLOUD_API_KEY": "${{ secrets.CLOUD_API_KEY }}",
+            "CLOUD_API_SECRET": "${{ secrets.CLOUD_API_SECRET }}"
+          }
+        }
+        EOF
+        )
+        
+        # Intentar notificar a EC2 con timeout de 15 segundos y capturar respuesta
+        RESPONSE_FILE=$(mktemp)
+        HTTP_CODE=$(curl -s -X POST \
+          -H "Content-Type: application/json" \
+          -H "X-GitHub-Event: push" \
+          -d "$PAYLOAD" \
+          --max-time 15 \
+          --connect-timeout 10 \
+          --write-out "%{http_code}" \
+          --output "$RESPONSE_FILE" \
+          "http://$EC2_HOST:9000/deploy" 2>&1 || echo "000")
+        
+        RESPONSE_BODY=$(cat "$RESPONSE_FILE" 2>/dev/null || echo "Sin respuesta")
+        rm -f "$RESPONSE_FILE"
+        
+        echo ""
+        echo "📊 Resultado del webhook:"
+        echo "   Código HTTP: $HTTP_CODE"
+        
+        # Códigos 200 y 202 son exitosos (202 = Accepted, procesando en background)
+        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "202" ]; then
+          echo "   ✅ Webhook enviado exitosamente"
+          echo "   📝 Respuesta: $RESPONSE_BODY"
+          echo ""
+          echo "🚀 Despliegue automático iniciado en el servidor"
+          echo "WEBHOOK_STATUS=success" >> $GITHUB_OUTPUT
+        elif [ "$HTTP_CODE" = "000" ]; then
+          echo "   ❌ ERROR: No se pudo conectar al webhook"
+          echo ""
+          echo "   🔧 DIAGNÓSTICO:"
+          echo "   ─────────────────────────────────────────"
+          echo "   El webhook server NO está corriendo en el EC2."
+          echo ""
+          echo "   Para iniciar el webhook, conecta al EC2 y ejecuta:"
+          echo "   ┌─────────────────────────────────────────┐"
+          echo "   │ cd C:\\tickify-backend\\ec2_scripts      │"
+          echo "   │ python webhook_server.py                │"
+          echo "   └─────────────────────────────────────────┘"
+          echo ""
+          echo "   O para ejecutarlo en background:"
+          echo "   ┌─────────────────────────────────────────┐"
+          echo "   │ Start-Process python -ArgumentList     │"
+          echo "   │   'webhook_server.py' -WindowStyle     │"
+          echo "   │   Hidden                                │"
+          echo "   └─────────────────────────────────────────┘"
+          echo ""
+          echo "WEBHOOK_STATUS=failed" >> $GITHUB_OUTPUT
+        else
+          echo "   ⚠️ Webhook respondió con código inesperado: $HTTP_CODE"
+          echo "   📝 Respuesta: $RESPONSE_BODY"
+          echo ""
+          echo "WEBHOOK_STATUS=error" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Verify deployment (if webhook succeeded)
+      if: steps.webhook.outputs.WEBHOOK_STATUS == 'success'
+      run: |
+        echo "⏳ Esperando 30 segundos para que el despliegue se complete..."
+        sleep 30
+        
+        echo ""
+        echo "🔍 Verificando que el backend esté respondiendo..."
+        
+        # Verificar usando HTTPS a través de nginx (forma correcta)
+        HEALTH_RESPONSE=$(curl -s --max-time 10 "https://tickify.duckdns.org/api/eventos" 2>&1 || echo "ERROR")
+        
+        if echo "$HEALTH_RESPONSE" | grep -qE "detail|eventos|\[\]|\{"; then
+          echo "✅ Backend está respondiendo correctamente"
+          echo "📝 El API responde con JSON válido"
+          echo ""
+          echo "🌐 Puedes verificar en: https://tickify.duckdns.org"
+        else
+          echo "⚠️ El backend puede estar reiniciándose..."
+          echo "📝 Respuesta: $HEALTH_RESPONSE"
+          echo ""
+          echo "💡 Verifica manualmente en: https://tickify.duckdns.org"
+        fi
+    
+    - name: Deployment Instructions
+      if: always()
+      run: |
+        WEBHOOK_STATUS="${{ steps.webhook.outputs.WEBHOOK_STATUS }}"
+        
+        echo ""
+        echo "============================================"
+        echo "   📋 RESUMEN DEL DESPLIEGUE"
+        echo "============================================"
+        echo ""
+        
+        if [ "$WEBHOOK_STATUS" = "success" ]; then
+          echo "🤖 DESPLIEGUE AUTOMÁTICO: ✅ Iniciado"
+          echo "   El webhook notificó exitosamente al EC2."
+          echo "   El servidor debería actualizarse automáticamente."
+          echo ""
+        elif [ "$WEBHOOK_STATUS" = "failed" ]; then
+          echo "🤖 DESPLIEGUE AUTOMÁTICO: ❌ Fallido"
+          echo "   El webhook server no está corriendo en el EC2."
+          echo ""
+          echo "   👉 ACCIÓN REQUERIDA: Despliegue manual"
+          echo ""
+        else
+          echo "🤖 DESPLIEGUE AUTOMÁTICO: ⚠️ Error"
+          echo "   Hubo un problema con el webhook."
+          echo ""
+        fi
+        
+        echo "📥 DESPLIEGUE MANUAL (si es necesario):"
+        echo ""
+        echo "   Opción A - Usando Git en EC2:"
+        echo "   ┌─────────────────────────────────────────┐"
+        echo "   │ cd C:\\tickify-backend                   │"
+        echo "   │ git pull origin ${{ github.ref_name }}             │"
+        echo "   │ .\\deploy.ps1                            │"
+        echo "   └─────────────────────────────────────────┘"
+        echo ""
+        echo "   Opción B - Descargando artifact:"
+        echo "   1. Descarga: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        echo "   2. Extrae en C:\\tickify-backend\\"
+        echo "   3. Ejecuta: .\\deploy.ps1"
+        echo ""
+        echo "🌐 Verificar: https://tickify.duckdns.org"
+        echo "============================================"

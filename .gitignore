@@ -1,0 +1,69 @@
+# --- Environment / Secrets ---
+.env
+.env.local
+.env.development
+.env.production
+docker/.env
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+
+# --- Test artifacts ---
+/Backend/test-results/
+/Backend/test-results.html
+/Backend/.pytest_cache/
+/Backend/htmlcov/
+/Backend/.coverage
+/Backend/coverage.xml
+/Backend/report.html
+/Backend/test.db
+test.db
+
+# --- Playwright ---
+/Tests/test-results/
+/Tests/node_modules/
+/Frontend/tickify-frontend/test-results/
+/Frontend/tickify-frontend/playwright-report/
+/Frontend/tickify-frontend/remote-test-report/
+/Frontend/tickify-frontend/remote-test-results/
+/Frontend/tickify-frontend/.playwright/
+/Frontend/tickify-frontend/.auth/
+
+# --- Node ---
+node_modules/
+dist/
+.next/
+
+# --- Logs ---
+logs/
+*.log
+backend.log
+*.pid
+
+# --- IDEs ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Internal team docs (not relevant for public repo) ---
+.github/BADGES.md
+.github/BRANCH_PROTECTION.md
+.github/COMMIT_CONVENTION.md
+.github/PR_AUTOMATION_SUMMARY.md
+.github/README.md
+.github/WORKFLOW_GUIDE.md
+.github/pull_request_template.md
+Tests/CasosDePrueba/tests/backend/error_trace.txt

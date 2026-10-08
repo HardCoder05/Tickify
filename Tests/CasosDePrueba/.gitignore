@@ -1,0 +1,47 @@
+# Archivos de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Entornos virtuales
+venv/
+env/
+ENV/
+
+# Reportes de tests
+casos-prueba-report.html
+test-results.html
+*.xml
+.pytest_cache/
+
+# Cobertura
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporales
+*.tmp
+*.temp

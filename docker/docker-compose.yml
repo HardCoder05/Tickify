@@ -1,0 +1,60 @@
+# ============================================
+# DOCKER COMPOSE - TICKIFY
+# Backend (FastAPI) + Frontend (React/Vite) + Nginx
+# BD externa (PostgreSQL)
+# ============================================
+# Usage: cd docker && docker-compose up -d --build
+# Copy .env.example to .env and fill in your values first.
+# ============================================
+
+services:
+  # ----------------------------------------
+  # BACKEND - FastAPI
+  # ----------------------------------------
+  backend:
+    build:
+      context: ../Backend
+      dockerfile: Dockerfile
+    container_name: tickify-backend
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ----------------------------------------
+  # FRONTEND - React (Vite)
+  # ----------------------------------------
+  frontend:
+    build:
+      context: ../Frontend/tickify-frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+    container_name: tickify-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+  # ----------------------------------------
+  # NGINX - Reverse Proxy
+  # ----------------------------------------
+  nginx:
+    image: nginx:alpine
+    container_name: tickify-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend

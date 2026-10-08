@@ -1,0 +1,256 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, dev, dev/pruebas]
+  pull_request:
+    branches: [main, dev, dev/pruebas]
+  workflow_dispatch:
+
+jobs:
+  # -------------------------------------------------------
+  # Job 1: Backend unit tests
+  # -------------------------------------------------------
+  backend-tests:
+    name: 🐍 Backend Tests
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: tickify_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        working-directory: ./Backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run backend tests
+        working-directory: ./Backend
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_NAME: tickify_test
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tickify_test
+        run: |
+          python -m pytest tests/ -v --html=test-results.html --self-contained-html
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-test-results
+          path: Backend/test-results.html
+          retention-days: 30
+
+  # -------------------------------------------------------
+  # Job 2: Frontend smoke tests
+  # -------------------------------------------------------
+  smoke-tests:
+    name: 🔥 Frontend Smoke Tests
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: Frontend/tickify-frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./Frontend/tickify-frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: ./Tests
+        run: npx playwright install chromium --with-deps
+
+      - name: Start frontend
+        working-directory: ./Frontend/tickify-frontend
+        env:
+          VITE_API_URL: http://127.0.0.1:8000
+        run: |
+          nohup npm run dev -- --host 0.0.0.0 --port 5173 > frontend.log 2>&1 &
+          for i in {1..60}; do
+            curl -sf http://127.0.0.1:5173 && echo "✅ Frontend ready" && break
+            sleep 1
+          done
+
+      - name: Run smoke tests
+        working-directory: ./Frontend/tickify-frontend
+        env:
+          BASE_URL: http://127.0.0.1:5173
+        run: npm run test:e2e:smoke
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test-results
+          path: Frontend/tickify-frontend/playwright-report/
+          retention-days: 7
+
+      - name: Show logs on failure
+        if: failure()
+        run: cat Frontend/tickify-frontend/frontend.log || true
+
+  # -------------------------------------------------------
+  # Job 3: Full E2E tests (PR only)
+  # -------------------------------------------------------
+  e2e-tests:
+    name: 🎭 Full E2E Tests
+    needs: [backend-tests, smoke-tests]
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 40
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: tickify_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: Frontend/tickify-frontend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: ./Backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Start backend
+        working-directory: ./Backend
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_NAME: tickify_test
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tickify_test
+        run: |
+          python tests/seed_e2e_data.py
+          nohup uvicorn main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
+          for i in {1..30}; do
+            curl -sf http://127.0.0.1:8000/health && echo "✅ Backend ready" && break
+            sleep 2
+          done
+
+      - name: Install frontend dependencies
+        working-directory: ./Frontend/tickify-frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: ./Tests
+        run: npx playwright install chromium --with-deps
+
+      - name: Start frontend
+        working-directory: ./Frontend/tickify-frontend
+        env:
+          VITE_API_URL: http://127.0.0.1:8000
+        run: |
+          nohup npm run dev -- --host 0.0.0.0 > frontend.log 2>&1 &
+          for i in {1..30}; do
+            curl -sf http://127.0.0.1:5173 && echo "✅ Frontend ready" && break
+            sleep 2
+          done
+
+      - name: Run E2E tests
+        working-directory: ./Frontend/tickify-frontend
+        env:
+          BASE_URL: http://127.0.0.1:5173
+        run: npm run test:e2e:ci
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-report
+          path: Frontend/tickify-frontend/playwright-report/
+          retention-days: 30
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          echo "=== Backend Logs ===" && cat Backend/backend.log || true
+          echo "=== Frontend Logs ===" && cat Frontend/tickify-frontend/frontend.log || true
+
+  # -------------------------------------------------------
+  # Job 4: Summary
+  # -------------------------------------------------------
+  summary:
+    name: 📊 Status Summary
+    needs: [backend-tests, smoke-tests, e2e-tests]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## CI Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🐍 Backend Tests | ${{ needs.backend-tests.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔥 Smoke Tests | ${{ needs.smoke-tests.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "| 🎭 E2E Tests | ${{ needs.e2e-tests.result == 'success' && '✅ Passed' || (needs.e2e-tests.result == 'skipped' && '⏭️ Skipped' || '❌ Failed') }} |" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ needs.backend-tests.result }}" != "success" ] || [ "${{ needs.smoke-tests.result }}" != "success" ]; then
+            exit 1
+          fi
+          if [ "${{ github.event_name }}" == "pull_request" ] && [ "${{ needs.e2e-tests.result }}" != "success" ] && [ "${{ needs.e2e-tests.result }}" != "skipped" ]; then
+            exit 1
+          fi
