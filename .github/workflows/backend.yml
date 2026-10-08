@@ -1,22 +1,6 @@
 name: Backend CI/CD
 
-on:
-  push:
-    branches: 
-      - main
-      - 'dev/**'
-      - 'origin/dev/**'
-    # Activar con cambios en Backend O Frontend
-    paths:
-      - 'Backend/**'
-      - 'Frontend/**'
-      - '.github/workflows/backend.yml'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'Backend/**'
-      - 'Frontend/**'
-  workflow_dispatch:  # Permite ejecutar manualmente desde GitHub
+on: []  # disabled
 
 jobs:
   test-backend:

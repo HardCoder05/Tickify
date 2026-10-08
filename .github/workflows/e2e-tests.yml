@@ -1,12 +1,6 @@
 name: E2E Tests (Manual)
 
-on:
-  workflow_dispatch:
-    inputs:
-      reason:
-        description: "Reason for running E2E tests"
-        required: false
-        default: "Manual test run"
+on: []  # disabled
 
 jobs:
   e2e-tests:

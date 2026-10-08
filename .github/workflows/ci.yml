@@ -1,11 +1,6 @@
 name: CI Pipeline
 
-on:
-  push:
-    branches: [main, dev, dev/pruebas]
-  pull_request:
-    branches: [main, dev, dev/pruebas]
-  workflow_dispatch:
+on: []  # disabled
 
 jobs:
   # -------------------------------------------------------
